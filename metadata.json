@@ -1,0 +1,6 @@
+{
+  "name": "7 Minutes Left",
+  "description": "A stylized low-poly 3D third-person survival and wave-defense game where you protect an emergency generator in an abandoned settlement at dusk for 7 minutes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
