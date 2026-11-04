@@ -6,6 +6,10 @@ interface GameHUDProps {
   hud: HUDTelemetry;
   settings: GameSettings;
   input: InputManager | null;
+  isFullscreen: boolean;
+  showRotatePrompt: boolean;
+  onDismissRotatePrompt: () => void;
+  onToggleFullscreen: () => void;
   onPause: () => void;
   onToggleMute: () => void;
 }
@@ -21,6 +25,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   hud,
   settings,
   input,
+  isFullscreen,
+  showRotatePrompt,
+  onDismissRotatePrompt,
+  onToggleFullscreen,
   onPause,
   onToggleMute,
 }) => {
@@ -422,6 +430,28 @@ export const GameHUD: React.FC<GameHUDProps> = ({
 
           {/* Warnings & Notifications Stack */}
           <div className="mt-2 flex flex-col items-center gap-1">
+            {showRotatePrompt && (
+              <div className="pointer-events-auto flex flex-wrap items-center justify-center gap-2 bg-[#090e1d]/95 border border-cyan-400/60 text-cyan-200 text-[11px] font-medium tracking-wide px-3 py-1.5 rounded-lg shadow-lg max-w-[92vw]">
+                <span>ROTATE PHONE TO LANDSCAPE FOR BEST CONTROLS</span>
+                {!isFullscreen && (
+                  <button
+                    type="button"
+                    onClick={onToggleFullscreen}
+                    className="px-2 py-0.5 rounded bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-[10px] font-display font-bold tracking-wider"
+                  >
+                    FULLSCREEN
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onDismissRotatePrompt}
+                  aria-label="Dismiss orientation tip"
+                  className="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-bold"
+                >
+                  OK
+                </button>
+              </div>
+            )}
             {lowHealth && (
               <div className="bg-red-950/92 border border-red-500/70 text-red-200 text-[11px] font-semibold tracking-wider px-3 py-0.5 rounded shadow">
                 WARNING: SURVIVOR HEALTH CRITICAL
@@ -453,10 +483,56 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
         </div>
 
-        {/* RIGHT PANEL: Ammunition, Weapon Status, Kills, Score & Pause/Mute */}
+        {/* RIGHT PANEL: Ammunition, Weapon Status, Kills, Score & Fullscreen/Pause/Mute */}
         <div className="flex flex-col items-end gap-2">
           <div className="flex items-center gap-1.5 pointer-events-auto">
             <button
+              type="button"
+              onClick={onToggleFullscreen}
+              aria-label={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              aria-pressed={isFullscreen}
+              title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
+              className={`min-w-[44px] min-h-[44px] px-2.5 sm:px-3 py-2 bg-[#090e1d]/90 hover:bg-slate-800 border rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
+                isFullscreen
+                  ? 'border-cyan-400/55 text-cyan-300'
+                  : 'border-white/15 text-slate-200'
+              }`}
+            >
+              {isFullscreen ? (
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" />
+                </svg>
+              ) : (
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" />
+                </svg>
+              )}
+              <span className="hidden sm:inline">
+                {isFullscreen ? 'EXIT FULL' : 'FULLSCREEN'}
+              </span>
+            </button>
+            <button
+              type="button"
               onClick={onToggleMute}
               aria-label={settings.muted ? 'Unmute Audio' : 'Mute Audio'}
               className="min-w-[44px] min-h-[44px] px-3 py-2 bg-[#090e1d]/90 hover:bg-slate-800 border border-white/15 rounded-lg text-xs font-medium text-slate-200 flex items-center justify-center transition-colors"
@@ -464,6 +540,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
               {settings.muted ? 'MUTE: ON' : 'AUDIO: ON'}
             </button>
             <button
+              type="button"
               onClick={onPause}
               aria-label="Pause Game"
               className="min-w-[44px] min-h-[44px] px-3.5 py-2 bg-[#090e1d]/90 hover:bg-slate-800 border border-amber-400/35 rounded-lg text-xs font-display font-bold tracking-wider text-amber-400 flex items-center justify-center transition-colors"

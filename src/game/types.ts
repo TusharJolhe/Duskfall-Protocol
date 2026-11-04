@@ -23,6 +23,7 @@ export interface GameSettings {
   muted: boolean;
   graphicsQuality: QualityPreset;
   showPerfOverlay: boolean;
+  showAndroidDiagnostics: boolean;
 }
 
 export interface PerfMetrics {

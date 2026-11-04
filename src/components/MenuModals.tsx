@@ -222,6 +222,32 @@ export const MenuModals: React.FC<MenuModalsProps> = ({
                 {settings.showPerfOverlay ? 'ENABLED' : 'OFF'}
               </button>
             </div>
+
+            {/* Optional Android Fullscreen & Orientation Diagnostics */}
+            <div className="pt-2 border-t border-white/10 flex items-center justify-between">
+              <div>
+                <div className="text-slate-300 font-medium">
+                  Android Fullscreen &amp; Orientation Diagnostics
+                </div>
+                <div className="text-xs text-slate-400">
+                  Debug panel for Fullscreen API, iframe &amp; orientation lock
+                </div>
+              </div>
+              <button
+                onClick={() =>
+                  onUpdateSettings({
+                    showAndroidDiagnostics: !settings.showAndroidDiagnostics,
+                  })
+                }
+                className={`min-h-[40px] px-4 py-1.5 rounded-lg font-mono-tabular text-xs font-bold border transition-colors ${
+                  settings.showAndroidDiagnostics
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-400/50'
+                    : 'bg-slate-900 text-slate-400 border-white/10 hover:border-white/25'
+                }`}
+              >
+                {settings.showAndroidDiagnostics ? 'ENABLED' : 'OFF'}
+              </button>
+            </div>
           </div>
 
           <div className="mt-7 pt-4 border-t border-white/10 flex justify-end">

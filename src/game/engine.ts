@@ -54,6 +54,7 @@ export class SurvivalGameEngine {
     muted: false,
     graphicsQuality: 'MEDIUM',
     showPerfOverlay: false,
+    showAndroidDiagnostics: false,
   };
 
   // Decoupled 420-second active gameplay countdown
@@ -144,17 +145,41 @@ export class SurvivalGameEngine {
     }
 
     window.addEventListener('resize', this.handleResize);
+    window.addEventListener('orientationchange', this.handleResize);
+    window.visualViewport?.addEventListener('resize', this.handleResize);
     this.emitTelemetry();
     this.lastTimestamp = performance.now();
     this.scheduleNextFrame();
   }
 
-  private handleResize = () => {
+  private resizeTimer1 = 0;
+  private resizeTimer2 = 0;
+
+  private applyViewportSize = () => {
     if (this.disposed) return;
-    const w = this.container.clientWidth || window.innerWidth;
-    const h = this.container.clientHeight || window.innerHeight;
+    const rect = this.container.getBoundingClientRect();
+    const w = Math.max(
+      1,
+      Math.round(rect.width || this.container.clientWidth || window.innerWidth)
+    );
+    const h = Math.max(
+      1,
+      Math.round(
+        rect.height || this.container.clientHeight || window.innerHeight
+      )
+    );
+    this.updateRendererQuality(this.settings.graphicsQuality);
     this.cameraCtrl.resize(w, h);
-    this.renderer.setSize(w, h);
+    this.renderer.setSize(w, h, true);
+  };
+
+  public handleResize = () => {
+    if (this.disposed) return;
+    this.applyViewportSize();
+    window.clearTimeout(this.resizeTimer1);
+    window.clearTimeout(this.resizeTimer2);
+    this.resizeTimer1 = window.setTimeout(this.applyViewportSize, 90);
+    this.resizeTimer2 = window.setTimeout(this.applyViewportSize, 240);
   };
 
   public getTargetFps(quality: QualityPreset): number {
@@ -226,7 +251,10 @@ export class SurvivalGameEngine {
     this.kills = 0;
     this.score = 0;
     this.defeatReason = null;
-    this.notifications = [];
+    const now = performance.now();
+    this.notifications = this.notifications.filter(
+      (n) => now - n.timestamp < 500
+    );
 
     this.player.reset();
     this.generator.reset();
@@ -272,6 +300,14 @@ export class SurvivalGameEngine {
     this.particles.reset();
     this.player.reset();
     this.generator.reset();
+    this.emitTelemetry();
+  }
+
+  public notifyUser(
+    text: string,
+    color: 'cyan' | 'amber' | 'emerald' | 'crimson' = 'amber'
+  ) {
+    this.pushNotification(text, color);
     this.emitTelemetry();
   }
 
@@ -887,7 +923,11 @@ export class SurvivalGameEngine {
     this.disposed = true;
     cancelAnimationFrame(this.frameId);
     clearTimeout(this.frameId);
+    clearTimeout(this.resizeTimer1);
+    clearTimeout(this.resizeTimer2);
     window.removeEventListener('resize', this.handleResize);
+    window.removeEventListener('orientationchange', this.handleResize);
+    window.visualViewport?.removeEventListener('resize', this.handleResize);
     this.input.detach();
     this.audio.dispose();
     this.world.dispose();
