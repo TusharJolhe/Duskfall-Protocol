@@ -19,11 +19,16 @@ export class InputManager {
 
   public lookDeltaX = 0;
   public lookDeltaY = 0;
+  public touchSensitivity = 1.0;
 
   private canvas: HTMLElement | null = null;
   private isPointerDownOnCanvas = false;
   private lastMouseX = 0;
   private lastMouseY = 0;
+  private lastTouchTimestamp = 0;
+  private canvasTouchId: number | null = null;
+  private lastCanvasTouchX = 0;
+  private lastCanvasTouchY = 0;
   private enabled = false;
 
   private boundKeyDown: (e: KeyboardEvent) => void;
@@ -31,6 +36,9 @@ export class InputManager {
   private boundMouseDown: (e: MouseEvent) => void;
   private boundMouseUp: (e: MouseEvent) => void;
   private boundMouseMove: (e: MouseEvent) => void;
+  private boundTouchStart: (e: TouchEvent) => void;
+  private boundTouchMove: (e: TouchEvent) => void;
+  private boundTouchEnd: (e: TouchEvent) => void;
   private boundBlur: () => void;
   private boundContextMenu: (e: Event) => void;
 
@@ -40,6 +48,9 @@ export class InputManager {
     this.boundMouseDown = this.onMouseDown.bind(this);
     this.boundMouseUp = this.onMouseUp.bind(this);
     this.boundMouseMove = this.onMouseMove.bind(this);
+    this.boundTouchStart = this.onCanvasTouchStart.bind(this);
+    this.boundTouchMove = this.onCanvasTouchMove.bind(this);
+    this.boundTouchEnd = this.onCanvasTouchEnd.bind(this);
     this.boundBlur = this.onBlur.bind(this);
     this.boundContextMenu = (e: Event) => e.preventDefault();
   }
@@ -47,11 +58,22 @@ export class InputManager {
   public attach(canvas: HTMLElement) {
     this.detach();
     this.canvas = canvas;
+    canvas.style.touchAction = 'none';
     window.addEventListener('keydown', this.boundKeyDown);
     window.addEventListener('keyup', this.boundKeyUp);
     canvas.addEventListener('mousedown', this.boundMouseDown);
     window.addEventListener('mouseup', this.boundMouseUp);
     window.addEventListener('mousemove', this.boundMouseMove);
+    canvas.addEventListener('touchstart', this.boundTouchStart, {
+      passive: false,
+    });
+    canvas.addEventListener('touchmove', this.boundTouchMove, {
+      passive: false,
+    });
+    canvas.addEventListener('touchend', this.boundTouchEnd, { passive: false });
+    canvas.addEventListener('touchcancel', this.boundTouchEnd, {
+      passive: false,
+    });
     window.addEventListener('blur', this.boundBlur);
     canvas.addEventListener('contextmenu', this.boundContextMenu);
   }
@@ -61,6 +83,10 @@ export class InputManager {
     window.removeEventListener('keyup', this.boundKeyUp);
     if (this.canvas) {
       this.canvas.removeEventListener('mousedown', this.boundMouseDown);
+      this.canvas.removeEventListener('touchstart', this.boundTouchStart);
+      this.canvas.removeEventListener('touchmove', this.boundTouchMove);
+      this.canvas.removeEventListener('touchend', this.boundTouchEnd);
+      this.canvas.removeEventListener('touchcancel', this.boundTouchEnd);
       this.canvas.removeEventListener('contextmenu', this.boundContextMenu);
     }
     window.removeEventListener('mouseup', this.boundMouseUp);
@@ -97,6 +123,16 @@ export class InputManager {
     this.interactHeld = false;
     this.lookDeltaX = 0;
     this.lookDeltaY = 0;
+    this.isPointerDownOnCanvas = false;
+    this.canvasTouchId = null;
+  }
+
+  /**
+   * Clears any stale touch/pointer look state across fullscreen or orientation transitions
+   * without interrupting active keyboard controls.
+   */
+  public resetTouchLookState() {
+    this.canvasTouchId = null;
     this.isPointerDownOnCanvas = false;
   }
 
@@ -165,18 +201,25 @@ export class InputManager {
       this.mobileSprintToggle;
   }
 
+  public handleDesktopMouseDown(e: MouseEvent) {
+    this.onMouseDown(e);
+  }
+
   private onMouseDown(e: MouseEvent) {
     if (!this.enabled) return;
-    // Ignore if touch device synthetic mouse event
+    // Ignore synthetic mouse events generated after touch input on mobile browsers
+    if (performance.now() - this.lastTouchTimestamp < 650) return;
+
     if (e.button === 0) {
       this.fireHeld = true;
       this.isPointerDownOnCanvas = true;
       this.lastMouseX = e.clientX;
       this.lastMouseY = e.clientY;
-      // Request pointer lock on desktop canvas click if supported
+      // Request pointer lock on desktop canvas click if supported (never on Android/touch)
       if (
         this.canvas &&
         !('ontouchstart' in window) &&
+        navigator.maxTouchPoints === 0 &&
         document.pointerLockElement !== this.canvas
       ) {
         try {
@@ -201,10 +244,13 @@ export class InputManager {
 
   private onMouseMove(e: MouseEvent) {
     if (!this.enabled) return;
+    // Ignore synthetic mousemove events triggered by touch input
+    if (performance.now() - this.lastTouchTimestamp < 650) return;
+
     if (document.pointerLockElement === this.canvas) {
       this.lookDeltaX += e.movementX;
       this.lookDeltaY += e.movementY;
-    } else if (!('ontouchstart' in window)) {
+    } else if (!('ontouchstart' in window) || navigator.maxTouchPoints === 0) {
       // Allow smooth mouse look on desktop even if pointerLock is restricted by iframe
       if (this.isPointerDownOnCanvas || e.movementX !== undefined) {
         const dx =
@@ -221,8 +267,58 @@ export class InputManager {
     }
   }
 
+  // Fallback direct canvas touch look handlers (if a touch reaches the WebGL canvas directly)
+  private onCanvasTouchStart(e: TouchEvent) {
+    if (!this.enabled) return;
+    this.lastTouchTimestamp = performance.now();
+    if (this.canvasTouchId !== null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      // Prefer right side / center area outside the bottom-left joystick zone
+      if (t.clientX > window.innerWidth * 0.28 || t.clientY < window.innerHeight * 0.55) {
+        this.canvasTouchId = t.identifier;
+        this.lastCanvasTouchX = t.clientX;
+        this.lastCanvasTouchY = t.clientY;
+        e.preventDefault();
+        break;
+      }
+    }
+  }
+
+  private onCanvasTouchMove(e: TouchEvent) {
+    if (!this.enabled || this.canvasTouchId === null) return;
+    this.lastTouchTimestamp = performance.now();
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const t = e.changedTouches[i];
+      if (t.identifier === this.canvasTouchId) {
+        const rawDx = t.clientX - this.lastCanvasTouchX;
+        const rawDy = t.clientY - this.lastCanvasTouchY;
+        this.lastCanvasTouchX = t.clientX;
+        this.lastCanvasTouchY = t.clientY;
+        if (Math.abs(rawDx) < 160 && Math.abs(rawDy) < 160) {
+          const mult = this.touchSensitivity * 1.55;
+          this.addTouchLookDelta(rawDx * mult, rawDy * mult);
+        }
+        e.preventDefault();
+        break;
+      }
+    }
+  }
+
+  private onCanvasTouchEnd(e: TouchEvent) {
+    this.lastTouchTimestamp = performance.now();
+    if (this.canvasTouchId === null) return;
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === this.canvasTouchId) {
+        this.canvasTouchId = null;
+        break;
+      }
+    }
+  }
+
   // Mobile Virtual Control Handlers
   public setJoystick(x: number, y: number, active: boolean) {
+    this.lastTouchTimestamp = performance.now();
     this.joystickX = x;
     this.joystickY = y;
     this.joystickActive = active;
@@ -236,6 +332,7 @@ export class InputManager {
   }
 
   public setMobileSprint(active: boolean) {
+    this.lastTouchTimestamp = performance.now();
     this.mobileSprintToggle = active;
     this.sprintHeld =
       this.keys.has('ShiftLeft') ||
@@ -248,12 +345,14 @@ export class InputManager {
   }
 
   public addTouchLookDelta(dx: number, dy: number) {
+    this.lastTouchTimestamp = performance.now();
     if (!this.enabled) return;
     this.lookDeltaX += dx;
     this.lookDeltaY += dy;
   }
 
   public setMobileFireHeld(held: boolean) {
+    this.lastTouchTimestamp = performance.now();
     this.mobileFireHeld = held;
   }
 

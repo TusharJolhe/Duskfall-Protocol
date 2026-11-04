@@ -175,6 +175,7 @@ export class SurvivalGameEngine {
 
   public handleResize = () => {
     if (this.disposed) return;
+    this.input?.resetTouchLookState();
     this.applyViewportSize();
     window.clearTimeout(this.resizeTimer1);
     window.clearTimeout(this.resizeTimer2);
@@ -196,6 +197,7 @@ export class SurvivalGameEngine {
 
   public updateSettings(partial: Partial<GameSettings>) {
     this.settings = { ...this.settings, ...partial };
+    this.input.touchSensitivity = this.settings.touchSensitivity;
     this.audio.setVolume(this.settings.soundVolume, this.settings.muted);
     if (partial.graphicsQuality) {
       this.updateRendererQuality(partial.graphicsQuality);

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { InputManager } from '../game/input';
 import { GameSettings, HUDTelemetry } from '../game/types';
 
@@ -41,21 +41,65 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   });
   const [joyActive, setJoyActive] = useState(false);
 
-  // Multi-touch Camera Look Pad state (Right side drag)
+  // Multi-touch Camera Look Pad state (Full-screen behind HUD controls)
   const lookPointerId = useRef<number | null>(null);
   const lookLastPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Fire button multi-touch tracking
+  // Fire button multi-touch tracking (also supports aim-drag while holding FIRE)
   const firePointerId = useRef<number | null>(null);
+  const fireLastPos = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [firePressed, setFirePressed] = useState(false);
 
   const maxJoyRadius = 46;
 
+  // Reset stale pointer states on fullscreen, orientation, resize, or blur transitions
+  useEffect(() => {
+    const clearStaleLookState = () => {
+      lookPointerId.current = null;
+      input?.resetTouchLookState();
+    };
+
+    const clearAllStalePointers = () => {
+      lookPointerId.current = null;
+      joyPointerId.current = null;
+      firePointerId.current = null;
+      setJoyActive(false);
+      setKnobOffset({ x: 0, y: 0 });
+      setFirePressed(false);
+      input?.setJoystick(0, 0, false);
+      input?.setMobileFireHeld(false);
+      input?.resetTouchLookState();
+    };
+
+    document.addEventListener('fullscreenchange', clearStaleLookState);
+    document.addEventListener('webkitfullscreenchange', clearStaleLookState);
+    window.addEventListener('orientationchange', clearStaleLookState);
+    window.addEventListener('resize', clearStaleLookState);
+    window.addEventListener('blur', clearAllStalePointers);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', clearStaleLookState);
+      document.removeEventListener(
+        'webkitfullscreenchange',
+        clearStaleLookState
+      );
+      window.removeEventListener('orientationchange', clearStaleLookState);
+      window.removeEventListener('resize', clearStaleLookState);
+      window.removeEventListener('blur', clearAllStalePointers);
+    };
+  }, [input, isFullscreen]);
+
   const handleJoyPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
-    if (joyPointerId.current !== null) return;
+    if (joyPointerId.current !== null && joyPointerId.current !== e.pointerId) {
+      return;
+    }
     joyPointerId.current = e.pointerId;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore pointer capture errors
+    }
     const rect = e.currentTarget.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
@@ -91,22 +135,33 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     input?.setJoystick(ox / maxJoyRadius, oy / maxJoyRadius, dist > 4);
   };
 
-  // Right-side Touch Camera Drag handlers
+  // Touch Camera Drag handlers (active in both portrait & landscape, windowed & fullscreen)
   const handleLookPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (lookPointerId.current !== null) return;
+    // Preserve desktop mouse click firing & Pointer Lock
+    if (e.pointerType === 'mouse') {
+      input?.handleDesktopMouseDown(e.nativeEvent);
+      return;
+    }
+    if (e.pointerId === joyPointerId.current) return;
     lookPointerId.current = e.pointerId;
     lookLastPos.current = { x: e.clientX, y: e.clientY };
-    e.currentTarget.setPointerCapture(e.pointerId);
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore pointer capture errors
+    }
   };
 
   const handleLookPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.pointerId !== lookPointerId.current) return;
-    const dx =
-      (e.clientX - lookLastPos.current.x) * settings.touchSensitivity * 1.35;
-    const dy =
-      (e.clientY - lookLastPos.current.y) * settings.touchSensitivity * 1.35;
+    const rawDx = e.clientX - lookLastPos.current.x;
+    const rawDy = e.clientY - lookLastPos.current.y;
     lookLastPos.current = { x: e.clientX, y: e.clientY };
-    input?.addTouchLookDelta(dx, dy);
+    // Guard against coordinate jumps during orientation/fullscreen layout switches
+    if (Math.abs(rawDx) < 160 && Math.abs(rawDy) < 160) {
+      const mult = settings.touchSensitivity * 1.55;
+      input?.addTouchLookDelta(rawDx * mult, rawDy * mult);
+    }
   };
 
   const handleLookPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -114,13 +169,31 @@ export const GameHUD: React.FC<GameHUDProps> = ({
     lookPointerId.current = null;
   };
 
-  // Fire Button Pointer handlers
+  // Fire Button Pointer handlers (supports simultaneous firing + thumb drag aiming)
   const handleFireDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     firePointerId.current = e.pointerId;
-    e.currentTarget.setPointerCapture(e.pointerId);
+    fireLastPos.current = { x: e.clientX, y: e.clientY };
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Ignore pointer capture errors
+    }
     setFirePressed(true);
     input?.setMobileFireHeld(true);
+  };
+
+  const handleFireMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerId !== firePointerId.current) return;
+    e.stopPropagation();
+    if (e.pointerType === 'mouse') return;
+    const rawDx = e.clientX - fireLastPos.current.x;
+    const rawDy = e.clientY - fireLastPos.current.y;
+    fireLastPos.current = { x: e.clientX, y: e.clientY };
+    if (Math.abs(rawDx) < 160 && Math.abs(rawDy) < 160) {
+      const mult = settings.touchSensitivity * 1.55;
+      input?.addTouchLookDelta(rawDx * mult, rawDy * mult);
+    }
   };
 
   const handleFireUp = (e: React.PointerEvent<HTMLButtonElement>) => {
@@ -139,7 +212,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
   const ammoRatio = Math.max(0, Math.min(1, hud.ammo / hud.maxMagazine));
 
   return (
-    <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden select-none">
+    <div className="absolute inset-0 z-10 pointer-events-none overflow-hidden select-none touch-none">
       {/* Player Damage Vignette Overlay */}
       {hud.damageFlash > 0.01 && (
         <div
@@ -152,13 +225,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
         />
       )}
 
-      {/* Right-Side Touch Camera Rotation Surface (behind action buttons) */}
+      {/* Touch Camera-Look Interaction Surface (active at all screen widths, behind HUD controls) */}
       <div
         onPointerDown={handleLookPointerDown}
         onPointerMove={handleLookPointerMove}
         onPointerUp={handleLookPointerUp}
         onPointerCancel={handleLookPointerUp}
-        className="absolute top-14 right-0 bottom-0 w-1/2 pointer-events-auto md:pointer-events-none"
+        onLostPointerCapture={handleLookPointerUp}
+        className="absolute inset-0 z-0 touch-none pointer-events-auto"
       />
 
       {/* Center Tactical Aiming Reticle */}
@@ -692,7 +766,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
       )}
 
       {/* BOTTOM VIRTUAL TOUCH CONTROLS (Landscape-first ergonomic thumb zones) */}
-      <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between pointer-events-none">
+      <div className="absolute bottom-3 left-3 right-3 z-10 flex items-end justify-between pointer-events-none">
         {/* LEFT SIDE: Virtual Analog Joystick + Sprint Button */}
         <div className="flex items-end gap-3 pointer-events-auto">
           <div
@@ -700,6 +774,7 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             onPointerMove={handleJoyPointerMove}
             onPointerUp={handleJoyPointerUp}
             onPointerCancel={handleJoyPointerUp}
+            onLostPointerCapture={handleJoyPointerUp}
             className="relative w-32 h-32 sm:w-36 sm:h-36 rounded-full bg-[#090e1d]/78 border-2 border-cyan-500/40 flex items-center justify-center touch-none shadow-lg"
           >
             {/* Crosshair guides inside joystick */}
@@ -718,11 +793,12 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           </div>
 
           <button
+            type="button"
             onPointerDown={(e) => {
               e.stopPropagation();
               input?.toggleMobileSprint();
             }}
-            className={`min-w-[58px] min-h-[56px] px-3 py-2 rounded-xl border font-display text-xs font-bold tracking-wider transition-transform active:scale-95 ${
+            className={`min-w-[58px] min-h-[56px] px-3 py-2 rounded-xl border font-display text-xs font-bold tracking-wider transition-transform active:scale-95 touch-none ${
               hud.isSprinting
                 ? 'bg-amber-500 text-slate-950 border-amber-300'
                 : 'bg-[#090e1d]/88 text-slate-200 border-white/20'
@@ -754,9 +830,14 @@ export const GameHUD: React.FC<GameHUDProps> = ({
           <div className="flex flex-col items-end gap-2">
             {/* Contextual Interact / Repair Button */}
             <button
+              type="button"
               onPointerDown={(e) => {
                 e.stopPropagation();
-                e.currentTarget.setPointerCapture(e.pointerId);
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  // Ignore pointer capture errors
+                }
                 input?.triggerInteract(true);
               }}
               onPointerUp={(e) => {
@@ -767,7 +848,10 @@ export const GameHUD: React.FC<GameHUDProps> = ({
                 e.stopPropagation();
                 input?.setInteractHeld(false);
               }}
-              className={`min-w-[68px] min-h-[48px] px-3.5 py-2 rounded-xl border font-display text-xs font-bold tracking-wider transition-transform active:scale-95 ${
+              onLostPointerCapture={() => {
+                input?.setInteractHeld(false);
+              }}
+              className={`min-w-[68px] min-h-[48px] px-3.5 py-2 rounded-xl border font-display text-xs font-bold tracking-wider transition-transform active:scale-95 touch-none ${
                 hasInteraction || hud.isEmergencyRepairing
                   ? 'bg-emerald-500 text-slate-950 border-emerald-300'
                   : 'bg-[#090e1d]/80 text-slate-400 border-white/15'
@@ -779,33 +863,38 @@ export const GameHUD: React.FC<GameHUDProps> = ({
             <div className="flex items-center gap-2">
               {/* Reload Button */}
               <button
+                type="button"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   input?.triggerReload();
                 }}
-                className="min-w-[60px] min-h-[52px] px-3 py-2 rounded-xl bg-[#090e1d]/88 hover:bg-slate-800 border border-cyan-500/45 text-cyan-300 font-display text-xs font-bold tracking-wider active:scale-95"
+                className="min-w-[60px] min-h-[52px] px-3 py-2 rounded-xl bg-[#090e1d]/88 hover:bg-slate-800 border border-cyan-500/45 text-cyan-300 font-display text-xs font-bold tracking-wider active:scale-95 touch-none"
               >
                 RELOAD
               </button>
 
               {/* Dodge Button */}
               <button
+                type="button"
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   input?.triggerDodge();
                 }}
-                className="min-w-[60px] min-h-[52px] px-3 py-2 rounded-xl bg-[#090e1d]/88 hover:bg-slate-800 border border-amber-500/45 text-amber-300 font-display text-xs font-bold tracking-wider active:scale-95"
+                className="min-w-[60px] min-h-[52px] px-3 py-2 rounded-xl bg-[#090e1d]/88 hover:bg-slate-800 border border-amber-500/45 text-amber-300 font-display text-xs font-bold tracking-wider active:scale-95 touch-none"
               >
                 DODGE
               </button>
             </div>
           </div>
 
-          {/* Large Primary Attack / Pulse Fire Button */}
+          {/* Large Primary Attack / Pulse Fire Button (supports hold + drag to aim) */}
           <button
+            type="button"
             onPointerDown={handleFireDown}
+            onPointerMove={handleFireMove}
             onPointerUp={handleFireUp}
             onPointerCancel={handleFireUp}
+            onLostPointerCapture={handleFireUp}
             className={`w-20 h-20 sm:w-24 sm:h-24 rounded-full border-2 font-display text-sm sm:text-base font-bold tracking-wider flex items-center justify-center transition-transform touch-none shadow-lg ${
               firePressed
                 ? 'bg-cyan-400 text-slate-950 border-white scale-95'
